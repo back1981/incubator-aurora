@@ -114,7 +114,7 @@ public class CommandLineDriverSettingsModule extends AbstractModule {
   protected void configure() {
     FrameworkInfo frameworkInfo = FrameworkInfo.newBuilder()
         .setUser(EXECUTOR_USER.get())
-		.setRole(MESOS_ROLE)
+		.setRole(MESOS_ROLE.get())
         .setName(TWITTER_FRAMEWORK_NAME)
         .setCheckpoint(REQUIRE_SLAVE_CHECKPOINT.get())
         .setFailoverTimeout(FRAMEWORK_FAILOVER_TIMEOUT.get().as(Time.SECONDS))
