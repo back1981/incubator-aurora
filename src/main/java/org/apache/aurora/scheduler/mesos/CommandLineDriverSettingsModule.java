@@ -51,7 +51,7 @@ public class CommandLineDriverSettingsModule extends AbstractModule {
   private static final Arg<String> MESOS_MASTER_ADDRESS = Arg.create();
 
   @CmdLine(name = "mesos_role",
-  help = "role defined in mesos")
+  help = "role defined in mesos, aurora register framework with this role")
   private static final Arg<String> MESOS_ROLE = Arg.create("*");
   
   @VisibleForTesting
@@ -112,6 +112,7 @@ public class CommandLineDriverSettingsModule extends AbstractModule {
 
   @Override
   protected void configure() {
+    LOG.info("MESOS_ROLE=%s", MESOS_ROLE.get());
     FrameworkInfo frameworkInfo = FrameworkInfo.newBuilder()
         .setUser(EXECUTOR_USER.get())
 		.setRole(MESOS_ROLE.get())
