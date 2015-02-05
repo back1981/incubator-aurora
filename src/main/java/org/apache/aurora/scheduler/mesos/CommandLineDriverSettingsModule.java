@@ -112,7 +112,7 @@ public class CommandLineDriverSettingsModule extends AbstractModule {
 
   @Override
   protected void configure() {
-    LOG.info("MESOS_ROLE=%s", MESOS_ROLE.get());
+    LOG.info("MESOS_ROLE="+ MESOS_ROLE.get());
     FrameworkInfo frameworkInfo = FrameworkInfo.newBuilder()
         .setUser(EXECUTOR_USER.get())
 		.setRole(MESOS_ROLE.get())
