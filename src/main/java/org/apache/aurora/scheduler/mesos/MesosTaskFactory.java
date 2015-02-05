@@ -13,18 +13,13 @@
  */
 package org.apache.aurora.scheduler.mesos;
 
+import static java.util.Objects.requireNonNull;
+
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.inject.Inject;
-
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterables;
-import com.google.protobuf.ByteString;
-import com.twitter.common.quantity.Amount;
-import com.twitter.common.quantity.Data;
 
 import org.apache.aurora.Protobufs;
 import org.apache.aurora.codec.ThriftBinaryCodec;
@@ -42,13 +37,19 @@ import org.apache.mesos.Protos.CommandInfo;
 import org.apache.mesos.Protos.ContainerInfo;
 import org.apache.mesos.Protos.ExecutorID;
 import org.apache.mesos.Protos.ExecutorInfo;
+import org.apache.mesos.Protos.Offer;
 import org.apache.mesos.Protos.Resource;
 import org.apache.mesos.Protos.SlaveID;
 import org.apache.mesos.Protos.TaskID;
 import org.apache.mesos.Protos.TaskInfo;
 import org.apache.mesos.Protos.Volume;
 
-import static java.util.Objects.requireNonNull;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.protobuf.ByteString;
+import com.twitter.common.quantity.Amount;
+import com.twitter.common.quantity.Data;
 
 /**
  * A factory to create mesos task objects.
@@ -63,7 +64,7 @@ public interface MesosTaskFactory {
    * @return A new task.
    * @throws SchedulerException If the task could not be encoded.
    */
-  TaskInfo createFrom(IAssignedTask task, SlaveID slaveId) throws SchedulerException;
+  TaskInfo createFrom(IAssignedTask task, Offer offer) throws SchedulerException;
 
   // TODO(wfarner): Move this class to its own file to reduce visibility to package private.
   class MesosTaskFactoryImpl implements MesosTaskFactory {
@@ -113,8 +114,10 @@ public interface MesosTaskFactory {
         Amount.of(1L, Data.MB),
         0);
 
+
     @Override
-    public TaskInfo createFrom(IAssignedTask task, SlaveID slaveId) throws SchedulerException {
+    public TaskInfo createFrom(IAssignedTask task, Offer offer) throws SchedulerException {
+	  SlaveID slaveId = offer.getSlaveId();
       requireNonNull(task);
       requireNonNull(slaveId);
 
@@ -134,7 +137,7 @@ public interface MesosTaskFactory {
       List<Resource> resources = resourceSlot
           .toResourceList(task.isSetAssignedPorts()
               ? ImmutableSet.copyOf(task.getAssignedPorts().values())
-              : ImmutableSet.<Integer>of());
+              : ImmutableSet.<Integer>of(), offer);
 
       if (LOG.isLoggable(Level.FINE)) {
         LOG.fine("Setting task resources to "
@@ -149,9 +152,9 @@ public interface MesosTaskFactory {
               .setData(ByteString.copyFrom(taskInBytes));
 
       if (config.getContainer().isSetMesos()) {
-        configureTaskForNoContainer(task, config, taskBuilder);
+        configureTaskForNoContainer(task, config, taskBuilder, offer);
       } else if (config.getContainer().isSetDocker()) {
-        configureTaskForDockerContainer(task, config, taskBuilder);
+        configureTaskForDockerContainer(task, config, taskBuilder, offer);
       } else {
         throw new SchedulerException("Task had no supported container set.");
       }
@@ -162,7 +165,8 @@ public interface MesosTaskFactory {
     private void configureTaskForNoContainer(
         IAssignedTask task,
         ITaskConfig config,
-        TaskInfo.Builder taskBuilder) {
+        TaskInfo.Builder taskBuilder,
+        Offer offer) {
 
       CommandInfo commandInfo = CommandUtil.create(
           executorSettings.getExecutorPath(),
@@ -170,14 +174,15 @@ public interface MesosTaskFactory {
           "./",
           executorSettings.getExecutorFlags()).build();
 
-      ExecutorInfo.Builder executorBuilder = configureTaskForExecutor(task, config, commandInfo);
+      ExecutorInfo.Builder executorBuilder = configureTaskForExecutor(task, config, commandInfo, offer);
       taskBuilder.setExecutor(executorBuilder.build());
     }
 
     private void configureTaskForDockerContainer(
         IAssignedTask task,
         ITaskConfig taskConfig,
-        TaskInfo.Builder taskBuilder) {
+        TaskInfo.Builder taskBuilder,
+        Offer offer) {
 
       IDockerContainer config = taskConfig.getContainer().getDocker();
       ContainerInfo.DockerInfo.Builder dockerBuilder = ContainerInfo.DockerInfo.newBuilder()
@@ -197,7 +202,7 @@ public interface MesosTaskFactory {
           executorSettings.getExecutorFlags());
 
       ExecutorInfo.Builder execBuilder =
-          configureTaskForExecutor(task, taskConfig, commandInfoBuilder.build())
+          configureTaskForExecutor(task, taskConfig, commandInfoBuilder.build(), offer)
               .setContainer(containerBuilder.build());
 
       taskBuilder.setExecutor(execBuilder.build());
@@ -206,14 +211,15 @@ public interface MesosTaskFactory {
     private ExecutorInfo.Builder configureTaskForExecutor(
         IAssignedTask task,
         ITaskConfig config,
-        CommandInfo commandInfo) {
+        CommandInfo commandInfo,
+        Offer offer) {
 
       return ExecutorInfo.newBuilder()
           .setCommand(commandInfo)
           .setExecutorId(getExecutorId(task.getTaskId()))
           .setName(EXECUTOR_NAME)
           .setSource(getInstanceSourceName(config, task.getInstanceId()))
-          .addAllResources(RESOURCES_EPSILON.toResourceList());
+          .addAllResources(RESOURCES_EPSILON.toResourceList(offer));
     }
 
     private void configureContainerVolumes(ContainerInfo.Builder containerBuilder) {

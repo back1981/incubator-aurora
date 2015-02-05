@@ -13,6 +13,8 @@
  */
 package org.apache.aurora.scheduler.async;
 
+import static java.util.Objects.requireNonNull;
+
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
@@ -22,21 +24,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Logger;
 
 import javax.inject.Inject;
-
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Optional;
-import com.google.common.base.Supplier;
-import com.google.common.base.Throwables;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Maps;
-import com.google.protobuf.ByteString;
-import com.twitter.common.quantity.Amount;
-import com.twitter.common.quantity.Data;
-import com.twitter.common.quantity.Time;
-import com.twitter.common.stats.Stats;
-import com.twitter.common.stats.StatsProvider;
-import com.twitter.common.util.Clock;
-import com.twitter.common.util.Random;
 
 import org.apache.aurora.Protobufs;
 import org.apache.aurora.codec.ThriftBinaryCodec;
@@ -54,13 +41,27 @@ import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
 import org.apache.mesos.Protos;
 import org.apache.mesos.Protos.ExecutorID;
 import org.apache.mesos.Protos.ExecutorInfo;
+import org.apache.mesos.Protos.Offer;
 import org.apache.mesos.Protos.OfferID;
 import org.apache.mesos.Protos.SlaveID;
 import org.apache.mesos.Protos.TaskID;
 import org.apache.mesos.Protos.TaskInfo;
 import org.apache.mesos.Protos.TaskStatus;
 
-import static java.util.Objects.requireNonNull;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Optional;
+import com.google.common.base.Supplier;
+import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Maps;
+import com.google.protobuf.ByteString;
+import com.twitter.common.quantity.Amount;
+import com.twitter.common.quantity.Data;
+import com.twitter.common.quantity.Time;
+import com.twitter.common.stats.Stats;
+import com.twitter.common.stats.StatsProvider;
+import com.twitter.common.util.Clock;
+import com.twitter.common.util.Random;
 
 /**
  * A task launcher that periodically initiates garbage collection on a host, re-using a single
@@ -149,17 +150,17 @@ public class GcExecutorLauncher implements TaskLauncher {
 
   @VisibleForTesting
   static TaskInfo makeGcTask(
-      String sourceName,
-      SlaveID slaveId,
+      Offer offer,
       String gcExecutorPath,
       String uuid,
       AdjustRetainedTasks message) {
-
+    String sourceName = offer.getHostname();
+    SlaveID slaveId = offer.getSlaveId();
     ExecutorInfo.Builder executorInfo = ExecutorInfo.newBuilder()
         .setExecutorId(ExecutorID.newBuilder().setValue(EXECUTOR_NAME))
         .setName(EXECUTOR_NAME)
         .setSource(sourceName)
-        .addAllResources(GC_EXECUTOR_TASK_RESOURCES.toResourceList())
+        .addAllResources(GC_EXECUTOR_TASK_RESOURCES.toResourceList(offer))
         .setCommand(CommandUtil.create(gcExecutorPath, ImmutableList.<String>of()));
 
     byte[] data;
@@ -175,16 +176,16 @@ public class GcExecutorLauncher implements TaskLauncher {
         .setSlaveId(slaveId)
         .setData(ByteString.copyFrom(data))
         .setExecutor(executorInfo)
-        .addAllResources(EPSILON.toResourceList())
+        .addAllResources(EPSILON.toResourceList(offer))
         .build();
   }
 
-  private TaskInfo makeGcTask(String hostName, SlaveID slaveId) {
-    Set<IScheduledTask> tasksOnHost = Storage.Util.fetchTasks(storage, Query.slaveScoped(hostName));
+  private TaskInfo makeGcTask(Offer offer) {
+
+    Set<IScheduledTask> tasksOnHost = Storage.Util.fetchTasks(storage, Query.slaveScoped(offer.getHostname()));
     tasksCreated.incrementAndGet();
     return makeGcTask(
-        hostName,
-        slaveId,
+    	offer,
         settings.getGcExecutorPath().get(),
         uuidGenerator.get(),
         new AdjustRetainedTasks().setRetainedTasks(
@@ -216,7 +217,7 @@ public class GcExecutorLauncher implements TaskLauncher {
       public void run() {
         driver.launchTask(
             offer.getOffer().getId(),
-            makeGcTask(offer.getOffer().getHostname(), offer.getOffer().getSlaveId()));
+            makeGcTask(offer.getOffer()));
       }
     });
     offersConsumed.incrementAndGet();

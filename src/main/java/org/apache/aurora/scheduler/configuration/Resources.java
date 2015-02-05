@@ -51,6 +51,7 @@ import static java.util.Objects.requireNonNull;
  */
 public class Resources {
 
+  public static final String DEFAULT_MESOS_ROLE = "*";
   public static final String CPUS = "cpus";
   public static final String RAM_MB = "mem";
   public static final String DISK_MB = "disk";
@@ -99,6 +100,19 @@ public class Resources {
         && ram.as(Data.MB) >= other.ram.as(Data.MB)
         && numPorts >= other.numPorts;
   }
+  
+  private String getRole(Offer offer, String key) {
+	if(offer == null) {
+		  return DEFAULT_MESOS_ROLE;
+	}
+	List<Resource> offerResources = offer.getResourcesList();
+	for (Resource resource : offerResources) {
+		if (resource.getName().equals(key)) {
+			return resource.getRole();
+		}
+	}
+	return DEFAULT_MESOS_ROLE;
+  }
 
   /**
    * Adapts this resources object to a list of mesos resources.
@@ -106,12 +120,12 @@ public class Resources {
    * @param selectedPorts The ports selected, to be applied as concrete task ranges.
    * @return Mesos resources.
    */
-  public List<Resource> toResourceList(Set<Integer> selectedPorts) {
+  public List<Resource> toResourceList(Set<Integer> selectedPorts, Offer offer) {
     ImmutableList.Builder<Resource> resourceBuilder =
       ImmutableList.<Resource>builder()
-          .add(Resources.makeMesosResource(CPUS, numCpus))
-          .add(Resources.makeMesosResource(DISK_MB, disk.as(Data.MB)))
-          .add(Resources.makeMesosResource(RAM_MB, ram.as(Data.MB)));
+          .add(Resources.makeMesosResource(CPUS, numCpus, getRole(offer, CPUS)))
+          .add(Resources.makeMesosResource(DISK_MB, disk.as(Data.MB), getRole(offer, DISK_MB)))
+          .add(Resources.makeMesosResource(RAM_MB, ram.as(Data.MB), getRole(offer,RAM_MB)));
     if (!selectedPorts.isEmpty()) {
       resourceBuilder.add(Resources.makeMesosRangeResource(Resources.PORTS, selectedPorts));
     }
@@ -125,8 +139,12 @@ public class Resources {
    * @see {@link #toResourceList(java.util.Set)}
    * @return Mesos resources.
    */
+  public List<Resource> toResourceList(Offer offer) {
+    return toResourceList(ImmutableSet.<Integer>of(), offer);
+  }
+  
   public List<Resource> toResourceList() {
-    return toResourceList(ImmutableSet.<Integer>of());
+	return toResourceList(ImmutableSet.<Integer>of(), null);
   }
 
   @Override
@@ -296,8 +314,21 @@ public class Resources {
    */
   public static Resource makeMesosResource(String name, double value) {
     return Resource.newBuilder().setName(name).setType(Type.SCALAR)
-        .setScalar(Scalar.newBuilder().setValue(value)).build();
+        .setScalar(Scalar.newBuilder().setValue(value)).setRole(DEFAULT_MESOS_ROLE).build(); 
   }
+  
+  /**
+   * Creates a scalar mesos resource.
+   *
+   * @param name Name of the resource.
+   * @param value Value for the resource.
+   * @param role for the resource
+   * @return A mesos resource.
+   */
+  public static Resource makeMesosResource(String name, double value, String role) {
+    return Resource.newBuilder().setName(name).setType(Type.SCALAR)
+        .setScalar(Scalar.newBuilder().setValue(value)).setRole(role).build();
+  }  
 
   private static final Function<com.google.common.collect.Range<Integer>, Range> RANGE_TRANSFORM =
       new Function<com.google.common.collect.Range<Integer>, Range>() {

@@ -149,8 +149,8 @@ public final class ResourceSlot {
     return new ResourceSlot(Resources.subtract(a.resources, b));
   }
 
-  public List<Protos.Resource> toResourceList(Set<Integer> selectedPorts) {
-    return resources.toResourceList(selectedPorts);
+  public List<Protos.Resource> toResourceList(Set<Integer> selectedPorts, Offer offer) {
+    return resources.toResourceList(selectedPorts, offer);
   }
 
   public static final Ordering<ResourceSlot> ORDER = new Ordering<ResourceSlot>() {

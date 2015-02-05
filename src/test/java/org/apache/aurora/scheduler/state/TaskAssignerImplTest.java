@@ -64,6 +64,7 @@ public class TaskAssignerImplTest extends EasyMockTest {
       .addResources(Resource.newBuilder()
           .setName("ports")
           .setType(Type.RANGES)
+          .setRole("*")
           .setRanges(
               Ranges.newBuilder().addRange(Range.newBuilder().setBegin(PORT).setEnd(PORT))))
       .build();
@@ -114,7 +115,7 @@ public class TaskAssignerImplTest extends EasyMockTest {
         MESOS_OFFER.getSlaveId(),
         ImmutableSet.of(PORT)))
         .andReturn(TASK.getAssignedTask());
-    expect(taskFactory.createFrom(TASK.getAssignedTask(), MESOS_OFFER.getSlaveId()))
+    expect(taskFactory.createFrom(TASK.getAssignedTask(), MESOS_OFFER))
         .andReturn(TASK_INFO);
 
     control.replay();

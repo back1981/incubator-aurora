@@ -13,9 +13,11 @@
  */
 package org.apache.aurora.scheduler.configuration;
 
+import java.util.List;
 import java.util.Set;
 
 import com.google.common.base.Function;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.twitter.common.collections.Pair;
@@ -23,10 +25,15 @@ import com.twitter.common.quantity.Amount;
 import com.twitter.common.quantity.Data;
 
 import org.apache.aurora.gen.TaskConfig;
+import org.apache.aurora.scheduler.async.GcExecutorLauncher;
 import org.apache.aurora.scheduler.configuration.Resources.InsufficientResourcesException;
 import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
 import org.apache.mesos.Protos;
+import org.apache.mesos.Protos.FrameworkID;
+import org.apache.mesos.Protos.Offer;
+import org.apache.mesos.Protos.OfferID;
 import org.apache.mesos.Protos.Resource;
+import org.apache.mesos.Protos.SlaveID;
 import org.apache.mesos.Protos.Value.Range;
 import org.apache.mesos.Protos.Value.Ranges;
 import org.apache.mesos.Protos.Value.Type;
@@ -41,7 +48,21 @@ import static org.junit.Assert.fail;
 public class ResourcesTest {
 
   private static final String NAME = "resource_name";
-
+  private static final String HOST = "slave-host";
+  private static final ITaskConfig TASK = ITaskConfig.build(new TaskConfig()
+  .setNumCpus(1.0)
+  .setRamMb(1024)
+  .setDiskMb(2048)
+  .setRequestedPorts(ImmutableSet.of("http", "debug")));
+  
+  private static final Offer MESOS_OFFER = Offer.newBuilder()
+	      .setSlaveId(SlaveID.newBuilder().setValue("slave-id"))
+	      .setHostname(HOST)
+	      .setFrameworkId(FrameworkID.newBuilder().setValue("framework-id").build())
+	      .setId(OfferID.newBuilder().setValue("offer-id"))
+	      .addAllResources(toMockOfferResourceList())
+	      .build();
+  
   @Test
   public void testPortRangeExact() {
     Resource portsResource = createPortRange(Pair.of(1, 5));
@@ -171,12 +192,17 @@ public class ResourcesTest {
         ImmutableSet.of(8, 2, 4, 5, 7, 9, 1));
   }
 
-  private static final ITaskConfig TASK = ITaskConfig.build(new TaskConfig()
-      .setNumCpus(1.0)
-      .setRamMb(1024)
-      .setDiskMb(2048)
-      .setRequestedPorts(ImmutableSet.of("http", "debug")));
 
+
+  private static List<Resource> toMockOfferResourceList() {
+	    ImmutableList.Builder<Resource> resourceBuilder =
+	      ImmutableList.<Resource>builder()
+	          .add(Resources.makeMesosResource(Resources.CPUS, TASK.getNumCpus(), Resources.DEFAULT_MESOS_ROLE))
+	          .add(Resources.makeMesosResource(Resources.RAM_MB,  TASK.getRamMb(), Resources.DEFAULT_MESOS_ROLE))
+	          .add(Resources.makeMesosResource(Resources.DISK_MB,  TASK.getDiskMb(), Resources.DEFAULT_MESOS_ROLE));
+	    return resourceBuilder.build();
+  }
+  
   private static void assertLeftIsLarger(Resources left, Resources right) {
     assertTrue(left.greaterThanOrEqual(right));
     assertFalse(right.greaterThanOrEqual(left));
@@ -216,13 +242,13 @@ public class ResourcesTest {
             Resources.makeMesosResource(Resources.RAM_MB, TASK.getRamMb()),
             Resources.makeMesosResource(Resources.DISK_MB, TASK.getDiskMb()),
             Resources.makeMesosRangeResource(Resources.PORTS, ports)),
-        ImmutableSet.copyOf(resources.toResourceList(ports)));
+        ImmutableSet.copyOf(resources.toResourceList(ports, MESOS_OFFER)));
   }
 
   @Test
   public void testToResourceListInversible() {
     Resources resources = Resources.from(TASK);
-    Resources inverse = Resources.from(resources.toResourceList(ImmutableSet.of(80, 443)));
+    Resources inverse = Resources.from(resources.toResourceList(ImmutableSet.of(80, 443), MESOS_OFFER));
     assertEquals(resources, inverse);
     assertEquals(resources.hashCode(), inverse.hashCode());
   }
@@ -242,7 +268,7 @@ public class ResourcesTest {
             Resources.makeMesosResource(Resources.CPUS, TASK.getNumCpus()),
             Resources.makeMesosResource(Resources.RAM_MB, TASK.getRamMb()),
             Resources.makeMesosResource(Resources.DISK_MB, TASK.getDiskMb())),
-        ImmutableSet.copyOf(resources.toResourceList(ImmutableSet.<Integer>of())));
+        ImmutableSet.copyOf(resources.toResourceList(ImmutableSet.<Integer>of(), MESOS_OFFER)));
   }
 
   private void expectRanges(Set<Pair<Long, Long>> expected, Set<Integer> values) {

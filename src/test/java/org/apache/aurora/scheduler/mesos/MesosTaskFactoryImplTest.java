@@ -13,11 +13,12 @@
  */
 package org.apache.aurora.scheduler.mesos;
 
-import com.google.common.base.Optional;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
-import com.twitter.common.quantity.Data;
+import static org.apache.aurora.scheduler.ResourceSlot.MIN_THERMOS_RESOURCES;
+import static org.apache.aurora.scheduler.mesos.TaskExecutors.NO_OVERHEAD_EXECUTOR;
+import static org.apache.aurora.scheduler.mesos.TaskExecutors.SOME_OVERHEAD_EXECUTOR;
+import static org.junit.Assert.assertEquals;
+
+import java.util.List;
 
 import org.apache.aurora.gen.AssignedTask;
 import org.apache.aurora.gen.Container;
@@ -27,6 +28,7 @@ import org.apache.aurora.gen.JobKey;
 import org.apache.aurora.gen.MesosContainer;
 import org.apache.aurora.gen.TaskConfig;
 import org.apache.aurora.scheduler.ResourceSlot;
+import org.apache.aurora.scheduler.async.GcExecutorLauncher;
 import org.apache.aurora.scheduler.configuration.Resources;
 import org.apache.aurora.scheduler.mesos.MesosTaskFactory.MesosTaskFactoryImpl;
 import org.apache.aurora.scheduler.storage.entities.IAssignedTask;
@@ -34,15 +36,20 @@ import org.apache.aurora.scheduler.storage.entities.ITaskConfig;
 import org.apache.mesos.Protos.CommandInfo;
 import org.apache.mesos.Protos.CommandInfo.URI;
 import org.apache.mesos.Protos.ExecutorInfo;
+import org.apache.mesos.Protos.FrameworkID;
+import org.apache.mesos.Protos.Offer;
+import org.apache.mesos.Protos.OfferID;
+import org.apache.mesos.Protos.Resource;
 import org.apache.mesos.Protos.SlaveID;
 import org.apache.mesos.Protos.TaskInfo;
 import org.junit.Before;
 import org.junit.Test;
 
-import static org.apache.aurora.scheduler.ResourceSlot.MIN_THERMOS_RESOURCES;
-import static org.apache.aurora.scheduler.mesos.TaskExecutors.NO_OVERHEAD_EXECUTOR;
-import static org.apache.aurora.scheduler.mesos.TaskExecutors.SOME_OVERHEAD_EXECUTOR;
-import static org.junit.Assert.assertEquals;
+import com.google.common.base.Optional;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
+import com.twitter.common.quantity.Data;
 
 public class MesosTaskFactoryImplTest {
 
@@ -61,16 +68,34 @@ public class MesosTaskFactoryImplTest {
         .setNumCpus(5)
         .setContainer(Container.mesos(new MesosContainer()))
         .setRequestedPorts(ImmutableSet.of("http"))));
+  private static final String HOST = "slave-host";
+  private static final Offer MESOS_OFFER = Offer.newBuilder()
+	      .setSlaveId(SlaveID.newBuilder().setValue("slave-id"))
+	      .setHostname(HOST)
+	      .setFrameworkId(FrameworkID.newBuilder().setValue("framework-id").build())
+	      .setId(OfferID.newBuilder().setValue("offer-id"))
+	      .addAllResources(toMockResourceList())
+	      .build();
+  
   private static final IAssignedTask TASK_WITH_DOCKER = IAssignedTask.build(TASK.newBuilder()
       .setTask(
           new TaskConfig(TASK.getTask().newBuilder())
               .setContainer(Container.docker(new DockerContainer("testimage")))));
 
-  private static final SlaveID SLAVE = SlaveID.newBuilder().setValue("slave-id").build();
+//  private static final SlaveID SLAVE = SlaveID.newBuilder().setValue("slave-id").build();
 
   private MesosTaskFactory taskFactory;
   private ExecutorSettings config;
 
+  private static List<Resource> toMockResourceList() {
+	    ImmutableList.Builder<Resource> resourceBuilder =
+	      ImmutableList.<Resource>builder()
+	          .add(Resources.makeMesosResource(Resources.CPUS, 0.2, Resources.DEFAULT_MESOS_ROLE))
+	          .add(Resources.makeMesosResource(Resources.RAM_MB,  128, Resources.DEFAULT_MESOS_ROLE))
+	          .add(Resources.makeMesosResource(Resources.DISK_MB,  16, Resources.DEFAULT_MESOS_ROLE));
+	    return resourceBuilder.build();
+}
+  
   private static final ExecutorInfo DEFAULT_EXECUTOR = ExecutorInfo.newBuilder()
       .setExecutorId(MesosTaskFactoryImpl.getExecutorId(TASK.getTaskId()))
       .setName(MesosTaskFactoryImpl.EXECUTOR_NAME)
@@ -99,7 +124,7 @@ public class MesosTaskFactoryImplTest {
   @Test
   public void testExecutorInfoUnchanged() {
     taskFactory = new MesosTaskFactoryImpl(config);
-    TaskInfo task = taskFactory.createFrom(TASK, SLAVE);
+    TaskInfo task = taskFactory.createFrom(TASK, MESOS_OFFER);
     assertEquals(DEFAULT_EXECUTOR, task.getExecutor());
     checkTaskResources(TASK.getTask(), task);
   }
@@ -110,7 +135,7 @@ public class MesosTaskFactoryImplTest {
     AssignedTask assignedTask = TASK.newBuilder();
     assignedTask.getTask().unsetRequestedPorts();
     assignedTask.unsetAssignedPorts();
-    TaskInfo task = taskFactory.createFrom(IAssignedTask.build(assignedTask), SLAVE);
+    TaskInfo task = taskFactory.createFrom(IAssignedTask.build(assignedTask), MESOS_OFFER);
     checkTaskResources(ITaskConfig.build(assignedTask.getTask()), task);
   }
 
@@ -120,7 +145,7 @@ public class MesosTaskFactoryImplTest {
     // + executor overhead. We need to ensure we allocate a non-zero amount of ram in this case.
     config = NO_OVERHEAD_EXECUTOR;
     taskFactory = new MesosTaskFactoryImpl(config);
-    TaskInfo task = taskFactory.createFrom(TASK, SLAVE);
+    TaskInfo task = taskFactory.createFrom(TASK, MESOS_OFFER);
     assertEquals(DEFAULT_EXECUTOR, task.getExecutor());
 
     // Simulate the upsizing needed for the task to meet the minimum thermos requirements.
@@ -148,7 +173,7 @@ public class MesosTaskFactoryImplTest {
 
     assertEquals(
         MIN_THERMOS_RESOURCES,
-        getTotalTaskResources(taskFactory.createFrom(assignedTask, SLAVE)));
+        getTotalTaskResources(taskFactory.createFrom(assignedTask, MESOS_OFFER)));
   }
 
   private void checkTaskResources(ITaskConfig task, TaskInfo taskInfo) {
@@ -160,7 +185,7 @@ public class MesosTaskFactoryImplTest {
   private TaskInfo getDockerTaskInfo() {
     config = TaskExecutors.SOME_OVERHEAD_EXECUTOR;
     taskFactory = new MesosTaskFactoryImpl(config);
-    return taskFactory.createFrom(TASK_WITH_DOCKER, SLAVE);
+    return taskFactory.createFrom(TASK_WITH_DOCKER,MESOS_OFFER);
   }
 
   @Test
@@ -188,7 +213,7 @@ public class MesosTaskFactoryImplTest {
         Optional.<String>absent(),
         SOME_OVERHEAD_EXECUTOR.getExecutorOverhead());
     taskFactory = new MesosTaskFactoryImpl(config);
-    TaskInfo taskInfo = taskFactory.createFrom(TASK, SLAVE);
+    TaskInfo taskInfo = taskFactory.createFrom(TASK, MESOS_OFFER);
     assertEquals(EXECUTOR_WITH_WRAPPER, taskInfo.getExecutor());
   }
 

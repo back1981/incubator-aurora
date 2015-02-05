@@ -13,20 +13,20 @@
  */
 package org.apache.aurora.scheduler.async;
 
+import static org.apache.aurora.gen.ScheduleStatus.FAILED;
+import static org.apache.aurora.scheduler.async.GcExecutorLauncher.INSUFFICIENT_OFFERS_STAT_NAME;
+import static org.apache.aurora.scheduler.async.GcExecutorLauncher.LOST_TASKS_STAT_NAME;
+import static org.apache.aurora.scheduler.async.GcExecutorLauncher.SYSTEM_TASK_PREFIX;
+import static org.easymock.EasyMock.expect;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-
-import com.google.common.base.Optional;
-import com.google.common.base.Suppliers;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Maps;
-import com.google.common.util.concurrent.MoreExecutors;
-import com.twitter.common.quantity.Amount;
-import com.twitter.common.quantity.Time;
-import com.twitter.common.stats.StatsProvider;
-import com.twitter.common.testing.easymock.EasyMockTest;
-import com.twitter.common.util.testing.FakeClock;
 
 import org.apache.aurora.gen.AssignedTask;
 import org.apache.aurora.gen.ExecutorConfig;
@@ -46,6 +46,7 @@ import org.apache.aurora.scheduler.storage.entities.IHostAttributes;
 import org.apache.aurora.scheduler.storage.entities.IScheduledTask;
 import org.apache.aurora.scheduler.storage.testing.StorageTestUtil;
 import org.apache.mesos.Protos.FrameworkID;
+import org.apache.mesos.Protos.Offer;
 import org.apache.mesos.Protos.OfferID;
 import org.apache.mesos.Protos.Resource;
 import org.apache.mesos.Protos.SlaveID;
@@ -56,15 +57,18 @@ import org.apache.mesos.Protos.TaskStatus;
 import org.junit.Before;
 import org.junit.Test;
 
-import static org.apache.aurora.gen.ScheduleStatus.FAILED;
-import static org.apache.aurora.scheduler.async.GcExecutorLauncher.INSUFFICIENT_OFFERS_STAT_NAME;
-import static org.apache.aurora.scheduler.async.GcExecutorLauncher.LOST_TASKS_STAT_NAME;
-import static org.apache.aurora.scheduler.async.GcExecutorLauncher.SYSTEM_TASK_PREFIX;
-import static org.apache.mesos.Protos.Offer;
-import static org.easymock.EasyMock.expect;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import com.google.common.base.Optional;
+import com.google.common.base.Suppliers;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Maps;
+import com.google.common.util.concurrent.MoreExecutors;
+import com.twitter.common.quantity.Amount;
+import com.twitter.common.quantity.Data;
+import com.twitter.common.quantity.Time;
+import com.twitter.common.stats.StatsProvider;
+import com.twitter.common.testing.easymock.EasyMockTest;
+import com.twitter.common.util.testing.FakeClock;
 
 public class GcExecutorLauncherTest extends EasyMockTest {
 
@@ -75,14 +79,14 @@ public class GcExecutorLauncherTest extends EasyMockTest {
       .setHostname(HOST)
       .setFrameworkId(FrameworkID.newBuilder().setValue("framework-id").build())
       .setId(OfferID.newBuilder().setValue("offer-id"))
-      .addAllResources(GcExecutorLauncher.TOTAL_GC_EXECUTOR_RESOURCES.toResourceList())
+      .addAllResources(toMockResourceList())
       .build();
   private static final HostOffer OFFER =
       new HostOffer(MESOS_OFFER, IHostAttributes.build(new HostAttributes()));
 
   private static final String JOB_A = "jobA";
   private static final String TASK_UUID = "gc";
-
+  private static final Offer offer = null;
   private static final GcExecutorSettings SETTINGS =
       new GcExecutorSettings(Amount.of(1L, Time.HOURS), Optional.of("nonempty"));
 
@@ -105,6 +109,17 @@ public class GcExecutorLauncherTest extends EasyMockTest {
     statsProvider = createMock(StatsProvider.class);
     lostTasks = new AtomicLong();
     insufficientOffers = new AtomicLong();
+   
+   
+  }
+  
+  private static List<Resource> toMockResourceList() {
+	    ImmutableList.Builder<Resource> resourceBuilder =
+	      ImmutableList.<Resource>builder()
+	          .add(Resources.makeMesosResource(Resources.CPUS, GcExecutorLauncher.TOTAL_GC_EXECUTOR_RESOURCES.getNumCpus(), Resources.DEFAULT_MESOS_ROLE))
+	          .add(Resources.makeMesosResource(Resources.RAM_MB,  GcExecutorLauncher.TOTAL_GC_EXECUTOR_RESOURCES.getRam().as(Data.MB), Resources.DEFAULT_MESOS_ROLE))
+	          .add(Resources.makeMesosResource(Resources.DISK_MB,  GcExecutorLauncher.TOTAL_GC_EXECUTOR_RESOURCES.getDisk().as(Data.MB), Resources.DEFAULT_MESOS_ROLE));
+	    return resourceBuilder.build();
   }
 
   private void replayAndConstruct() {
@@ -226,11 +241,11 @@ public class GcExecutorLauncherTest extends EasyMockTest {
         Maps.transformValues(Tasks.mapById(ImmutableSet.copyOf(tasks)), Tasks.GET_STATUS);
     AdjustRetainedTasks message = new AdjustRetainedTasks().setRetainedTasks(statuses);
     TaskInfo task = GcExecutorLauncher.makeGcTask(
-        HOST,
-        OFFER.getOffer().getSlaveId(),
+    	MESOS_OFFER,	
         SETTINGS.getGcExecutorPath().get(),
         TASK_UUID,
-        message);
+        message
+        );
     driver.launchTask(OFFER.getOffer().getId(), task);
   }
 
